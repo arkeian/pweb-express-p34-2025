@@ -1,28 +1,25 @@
 import express from "express";
 import authRoutes from "./routes/auth.routes";
-import cors from "cors";
-import dotenv from "dotenv";
-import morgan from "morgan";
-import booksRouter from "./routes/book.routes";
-import genreRouter from "./routes/genre.routes";
-import { errorHandler } from "./middlewares/error.middlewares";
+import transactionRoutes from "./routes/transaction.route"; // 🆕 Import route transaksi
 
-dotenv.config();
 const app = express();
+
+// Middleware bawaan
 app.use(express.json());
-app.use(cors());
-app.use(morgan("dev"));
 
-app.use("/auth", authRoutes);
-app.use("/books", booksRouter);
-app.use("/genre", genreRouter);
+// Routes
+app.use("/auth", authRoutes);               // 🔹 Route untuk autentikasi (sudah ada)
+app.use("/transactions", transactionRoutes); // 🆕 Route untuk transaksi dan statistik
 
-app.get("/health-check", (req, res) => {
-    res.json({ success: true, message: "P", date: new Date().toDateString() });
+// Optional: Health check endpoint (bisa dihapus kalau tidak perlu)
+app.get("/", (req, res) => {
+  res.json({ message: "IT Literature Shop API is running 🚀" });
 });
 
-app.use((req, res) => res.status(404).json({ success: false, message: "Endpoint not found" }));
-
-app.use(errorHandler);
+// Error handler sederhana (opsional tapi bagus untuk debugging)
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  console.error("Unhandled Error:", err);
+  res.status(500).json({ message: "Internal Server Error" });
+});
 
 export default app;
