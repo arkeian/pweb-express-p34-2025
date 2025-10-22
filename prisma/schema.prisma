@@ -19,26 +19,15 @@ model User {
   orders     Order[]
 }
 
-enum BookCondition {
-  NEW
-  LIKE_NEW
-  VERY_GOOD
-  GOOD
-  ACCEPTABLE
-  POOR
-}
-
 model Genre {
-  id          String    @id @default(uuid())
-  name        String    @unique
-  description String?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime?
-  deletedAt   DateTime?
+  id         String   @id @default(uuid())
+  name       String   @unique
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  deletedAt  DateTime?
 
+  // Relasi
   books      Book[]
-
-  @@map("genres")
 }
 
 model Book {
@@ -46,23 +35,20 @@ model Book {
   title           String    @unique
   writer          String
   publisher       String
-  isbn            String?
+  publicationYear Int
   description     String?
-  publicationYear Int?
-  condition       BookCondition @default(NEW)
-  price           Int
+  price           Float
   stockQuantity   Int
   createdAt       DateTime  @default(now())
-  updatedAt       DateTime?
+  updatedAt       DateTime  @updatedAt
   deletedAt       DateTime?
 
+  // Foreign key
   genreId         String
   genre           Genre     @relation(fields: [genreId], references: [id])
 
+  // Relasi ke order items
   orderItems      OrderItem[]
-
-  @@index([genreId])
-  @@map("books")
 }
 
 model Order {
@@ -90,4 +76,33 @@ model OrderItem {
 
   bookId     String
   book       Book      @relation(fields: [bookId], references: [id])
+}
+
+model Transaction {
+  id           Int               @id @default(autoincrement())
+  user         User              @relation(fields: [userId], references: [id])
+  userId       Int
+  totalAmount  Float
+  createdAt    DateTime          @default(now())
+  items        TransactionItem[]
+}
+
+model TransactionItem {
+  id             Int          @id @default(autoincrement())
+  transaction    Transaction  @relation(fields: [transactionId], references: [id])
+  transactionId  Int
+  book           Book         @relation(fields: [bookId], references: [id])
+  bookId         Int
+  quantity       Int
+  price          Float
+}
+
+model User {
+  ...
+  transactions Transaction[]
+}
+
+model Book {
+  ...
+  transactionItems TransactionItem[]
 }
