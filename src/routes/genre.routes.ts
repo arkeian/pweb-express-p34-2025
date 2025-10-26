@@ -8,7 +8,8 @@ const router = express.Router();
 router.post(
     "/",
     requireAuth,
-    body("name").isString().notEmpty().withMessage("name is required"),
+    body("name").isString().notEmpty(),
+    body("description").isString().optional(),
     createGenre
 );
 
@@ -21,7 +22,15 @@ router.get(
 );
 
 router.get("/:id", requireAuth, getGenreById);
-router.patch("/:id", requireAuth, body("name").optional().isString(), updateGenre);
+
+router.patch(
+    "/:id",
+    requireAuth,
+    body("name").optional().isString(),
+    body("description").optional().isString(),
+    updateGenre
+);
+
 router.delete("/:id", requireAuth, deleteGenre);
 
 export default router;

@@ -1,131 +1,233 @@
 import { Request, Response } from "express";
 import { PrismaClient } from "@prisma/client";
+import { parsePagination, metaResponse } from "../utils/pagination";
 
 const prisma = new PrismaClient();
 
-// 🧩 POST /transactions
 export const createTransaction = async (req: Request, res: Response) => {
   try {
-    const userId = (req as any).user.id;
+    const authUser = (req as any).user;
+    const userId = authUser?.id || authUser?.userId;
+    if (!userId) {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+
     const { items } = req.body;
-
-    if (!items || !Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({ message: "Items cannot be empty" });
-    }
-
-    let totalAmount = 0;
-    const transactionItems: any[] = [];
-
-    for (const item of items) {
-      const book = await prisma.book.findUnique({ where: { id: item.bookId } });
-      if (!book) return res.status(404).json({ message: `Book ${item.bookId} not found` });
-      if (book.stock < item.quantity)
-        return res.status(400).json({ message: `Not enough stock for ${book.title}` });
-
-      totalAmount += book.price * item.quantity;
-      transactionItems.push({ bookId: book.id, quantity: item.quantity, price: book.price });
-
-      await prisma.book.update({
-        where: { id: book.id },
-        data: { stock: book.stock - item.quantity },
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(422).json({
+        success: false,
+        message: "Validation error",
+        data: [{ msg: "Items must be a non-empty array", path: "items", location: "body" }]
       });
     }
 
-    const transaction = await prisma.transaction.create({
-      data: {
-        userId,
-        totalAmount,
-        items: { create: transactionItems },
-      },
-      include: { items: true },
-    });
-
-    return res.status(201).json({ message: "Transaction created successfully", transaction });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
-
-// 🧩 GET /transactions
-export const getTransactions = async (req: Request, res: Response) => {
-  try {
-    const transactions = await prisma.transaction.findMany({
-      include: {
-        items: { include: { book: true } },
-        user: { select: { id: true, username: true } },
-      },
-      orderBy: { createdAt: "desc" },
-    });
-    res.json(transactions);
-  } catch {
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
-
-// 🧩 GET /transactions/:id
-export const getTransactionById = async (req: Request, res: Response) => {
-  try {
-    const id = Number(req.params.id);
-    const transaction = await prisma.transaction.findUnique({
-      where: { id },
-      include: {
-        items: { include: { book: true } },
-        user: { select: { id: true, username: true } },
-      },
-    });
-
-    if (!transaction) return res.status(404).json({ message: "Transaction not found" });
-    res.json(transaction);
-  } catch {
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
-
-// 🧩 GET /transactions/statistics
-export const getTransactionStatistics = async (req: Request, res: Response) => {
-  try {
-    const totalTransactions = await prisma.transaction.count();
-    const averageAmountData = await prisma.transaction.aggregate({
-      _avg: { totalAmount: true },
-    });
-
-    const genreStats = await prisma.transactionItem.groupBy({
-      by: ["bookId"],
-      _sum: { quantity: true },
-    });
-
-    const genreCount: Record<string, number> = {};
-
-    for (const stat of genreStats) {
-      const book = await prisma.book.findUnique({
-        where: { id: stat.bookId },
-        include: { genre: true },
-      });
-      if (book?.genre) {
-        const genreName = book.genre.name;
-        genreCount[genreName] = (genreCount[genreName] || 0) + (stat._sum.quantity ?? 0);
+    for (const [index, item] of items.entries()) {
+      if (!item.bookId) {
+        return res.status(422).json({
+          success: false,
+          message: "Validation error",
+          data: [{ msg: "bookId is required", path: `items[${index}].bookId`, location: "body" }]
+        });
+      }
+      if (!Number.isInteger(item.quantity) || item.quantity <= 0) {
+        return res.status(422).json({
+          success: false,
+          message: "Validation error",
+          data: [{ msg: "quantity must be a positive integer", path: `items[${index}].quantity`, location: "body" }]
+        });
       }
     }
 
-    const genres = Object.keys(genreCount);
-    const mostPopularGenre =
-      genres.length > 0
-        ? genres.reduce((a, b) => (genreCount[a] > genreCount[b] ? a : b))
-        : null;
-    const leastPopularGenre =
-      genres.length > 0
-        ? genres.reduce((a, b) => (genreCount[a] < genreCount[b] ? a : b))
-        : null;
+    const qtyByBook = new Map<string, number>();
+    for (const item of items) {
+      qtyByBook.set(item.bookId, (qtyByBook.get(item.bookId) || 0) + item.quantity);
+    }
 
-    res.json({
-      totalTransactions,
-      averageAmount: averageAmountData._avg.totalAmount || 0,
-      mostPopularGenre,
-      leastPopularGenre,
+    const bookIds = Array.from(qtyByBook.keys());
+    const books = await prisma.book.findMany({
+      where: { id: { in: bookIds }, deletedAt: null },
+      select: { id: true, title: true, price: true, stockQuantity: true }
+    });
+
+    if (books.length !== bookIds.length) {
+      const found = new Set(books.map(b => b.id));
+      const missing = bookIds.filter(id => !found.has(id));
+      return res.status(404).json({ success: false, message: `Book(s) not found: ${missing.join(", ")}` });
+    }
+
+    for (const b of books) {
+      const requested = qtyByBook.get(b.id)!;
+      if (b.stockQuantity < requested) {
+        return res.status(400).json({ success: false, message: `Not enough stock for "${b.title}"` });
+      }
+    }
+
+    let totalAmount = 0;
+    const txItemsData = books.map(b => {
+      const quantity = qtyByBook.get(b.id)!;
+      totalAmount += b.price * quantity;
+      return { bookId: b.id, quantity, price: b.price };
+    });
+
+    const transaction = await prisma.$transaction(async tx => {
+      for (const b of books) {
+        const q = qtyByBook.get(b.id)!;
+        await tx.book.update({
+          where: { id: b.id },
+          data: { stockQuantity: b.stockQuantity - q }
+        });
+      }
+
+      return await tx.transaction.create({
+        data: {
+          userId,
+          totalAmount,
+          items: { create: txItemsData }
+        },
+        include: {
+          items: { include: { book: { select: { id: true, title: true } } } }
+        }
+      });
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: "Transaction created successfully",
+      data: transaction
     });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: "Internal server error" });
+    return res.status(500).json({ success: false, message: "Internal server error" });
+  }
+};
+
+export const getAllTransactions = async (req: Request, res: Response) => {
+  try {
+    const { page, limit, skip } = parsePagination(req.query);
+
+    const total = await prisma.transaction.count();
+    const transactions = await prisma.transaction.findMany({
+      include: {
+        user: { select: { id: true, username: true, email: true } },
+        items: { include: { book: { select: { id: true, title: true } } } }
+      },
+      orderBy: { createdAt: "desc" },
+      skip,
+      take: limit
+    });
+
+    return res.json({
+      success: true,
+      message: "Get all transactions successfully",
+      data: transactions,
+      meta: metaResponse(page, limit, total)
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ success: false, message: "Internal server error" });
+  }
+};
+
+export const getTransactionById = async (req: Request, res: Response) => {
+  try {
+    const id = req.params.id;
+    const transaction = await prisma.transaction.findUnique({
+      where: { id },
+      include: {
+        user: { select: { id: true, username: true, email: true } },
+        items: { include: { book: { select: { id: true, title: true } } } }
+      }
+    });
+
+    if (!transaction) {
+      return res.status(404).json({ success: false, message: "Transaction not found" });
+    }
+
+    return res.json({
+      success: true,
+      message: "Get transaction detail successfully",
+      data: transaction
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ success: false, message: "Internal server error" });
+  }
+};
+
+export const getTransactionStatistics = async (req: Request, res: Response) => {
+  try {
+    const totalTransactions = await prisma.transaction.count();
+    const averageAmountAgg = await prisma.transaction.aggregate({ _avg: { totalAmount: true } });
+    const itemAgg = await prisma.transactionItem.groupBy({ by: ["bookId"], _sum: { quantity: true } });
+
+    if (itemAgg.length === 0) {
+      return res.json({
+        success: true,
+        message: "Get transaction statistics successfully",
+        data: {
+          totalTransactions,
+          averageAmount: averageAmountAgg._avg.totalAmount || 0,
+          mostPopularGenre: null,
+          leastPopularGenre: null
+        }
+      });
+    }
+
+    const books = await prisma.book.findMany({
+      where: { id: { in: itemAgg.map(i => i.bookId) } },
+      select: { id: true, genreId: true }
+    });
+
+    const genreByBook = new Map(books.map(b => [b.id, b.genreId]));
+    const quantityByGenre = new Map<string, number>();
+
+    for (const item of itemAgg) {
+      const gid = genreByBook.get(item.bookId);
+      if (!gid) continue;
+      const q = item._sum.quantity ?? 0;
+      quantityByGenre.set(gid, (quantityByGenre.get(gid) || 0) + q);
+    }
+
+    const genres = await prisma.genre.findMany({
+      where: { id: { in: Array.from(quantityByGenre.keys()) }, deletedAt: null },
+      select: { id: true, name: true }
+    });
+
+    const nameByGenre = new Map(genres.map(g => [g.id, g.name]));
+    const filtered = Array.from(quantityByGenre.entries()).filter(([gid]) => nameByGenre.has(gid));
+
+    if (filtered.length === 0) {
+      return res.json({
+        success: true,
+        message: "Get transaction statistics successfully",
+        data: {
+          totalTransactions,
+          averageAmount: averageAmountAgg._avg.totalAmount || 0,
+          mostPopularGenre: null,
+          leastPopularGenre: null
+        }
+      });
+    }
+
+    let mostId = filtered[0][0];
+    let leastId = filtered[0][0];
+    for (const [gid, qty] of filtered) {
+      if (qty > (quantityByGenre.get(mostId) || 0)) mostId = gid;
+      if (qty < (quantityByGenre.get(leastId) || 0)) leastId = gid;
+    }
+
+    return res.json({
+      success: true,
+      message: "Get transaction statistics successfully",
+      data: {
+        totalTransactions,
+        averageAmount: averageAmountAgg._avg.totalAmount || 0,
+        mostPopularGenre: nameByGenre.get(mostId) || null,
+        leastPopularGenre: nameByGenre.get(leastId) || null
+      }
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ success: false, message: "Internal server error" });
   }
 };

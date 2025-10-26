@@ -1,24 +1,17 @@
 import express from "express";
 import {
   createTransaction,
-  getTransactions,
+  getAllTransactions,
   getTransactionById,
   getTransactionStatistics,
 } from "../controllers/transaction.controller";
-import { requireAuth } from "../middlewares/auth.middlewares"; // 🟢 pakai requireAuth yang kamu punya
+import { requireAuth } from "../middlewares/auth.middlewares";
 
 const router = express.Router();
 
-// 🧩 Buat transaksi baru
 router.post("/", requireAuth, createTransaction);
-
-// 🧾 Ambil semua transaksi
-router.get("/", requireAuth, getTransactions);
-
-// 📊 Statistik transaksi
+router.get("/", requireAuth, getAllTransactions);
 router.get("/statistics", requireAuth, getTransactionStatistics);
-
-// 🔍 Detail transaksi berdasarkan ID
 router.get("/:id", requireAuth, getTransactionById);
 
 export default router;

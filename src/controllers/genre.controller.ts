@@ -14,12 +14,37 @@ export const createGenre = async (req: Request, res: Response) => {
         }
 
         const { name, description } = req.body;
+
+        const existingGenre = await prisma.genre.findUnique({ where: { name } });
+
+        if (existingGenre) {
+            if (existingGenre.deletedAt === null) {
+                return res.status(409).json({ success: false, message: "Genre name already exists" });
+            }
+
+            const restored = await prisma.genre.update({
+                where: { id: existingGenre.id },
+                data: {
+                    deletedAt: null,
+                    updatedAt: new Date(),
+                    description,
+                },
+            });
+
+            return res.status(200).json({
+                success: true,
+                message: "Genre restored successfully",
+                data: restored,
+            });
+        }
+
         const genre = await prisma.genre.create({ data: { name, description } });
 
         return res.status(201).json({ success: true, message: "Genre created successfully", data: { id: genre.id, name: genre.name, createdAt: genre.createdAt } });
     }
     catch (err) {
-        throw err;
+        console.error(err);
+        return res.status(500).json({ success: false, message: "Internal server error" });
     }
 };
 
@@ -51,7 +76,8 @@ export const getAllGenres = async (req: Request, res: Response) => {
         });
     }
     catch (err) {
-        throw err;
+        console.error(err);
+        return res.status(500).json({ success: false, message: "Internal server error" });
     }
 };
 
@@ -67,29 +93,68 @@ export const getGenreById = async (req: Request, res: Response) => {
         return res.json({ success: true, message: "Get genre detail successfully", data: genre });
     }
     catch (err) {
-        throw err;
+        console.error(err);
+        return res.status(500).json({ success: false, message: "Internal server error" });
     }
 };
 
 export const updateGenre = async (req: Request, res: Response) => {
     try {
-        const id = req.params.id;
+        const id = req.params.genre_id || req.params.id;
         const { name, description } = req.body;
 
-        const genreExisting = await prisma.genre.findFirst({ where: { id, deletedAt: null } });
+        const genreExisting = await prisma.genre.findFirst({
+            where: { id, deletedAt: null },
+        });
+
         if (!genreExisting) {
-            return res.status(404).json({ success: false, message: "Genre not found" });
+            return res
+                .status(404)
+                .json({ success: false, message: "Genre not found" });
+        }
+
+        if (name && name !== genreExisting.name) {
+            const duplicate = await prisma.genre.findFirst({
+                where: {
+                    name,
+                    deletedAt: null,
+                    NOT: { id },
+                },
+            });
+
+            if (duplicate) {
+                return res.status(409).json({
+                    success: false,
+                    message: "Genre name already exists",
+                });
+            }
         }
 
         const updated = await prisma.genre.update({
             where: { id },
-            data: { name: name ?? genreExisting.name, description: description ?? genreExisting.description, updatedAt: new Date() }
+            data: {
+                name: name ?? genreExisting.name,
+                description: description ?? genreExisting.description,
+                updatedAt: new Date(),
+            },
         });
 
-        return res.json({ success: true, message: "Genre updated successfully", data: { id: updated.id, name: updated.name, updatedAt: updated.updatedAt } });
+        return res.json({
+            success: true,
+            message: "Genre updated successfully",
+            data: {
+                id: updated.id,
+                name: updated.name,
+                description: updated.description,
+                updatedAt: updated.updatedAt,
+            },
+        });
     }
     catch (err) {
-        throw err;
+        console.error(err);
+        return res
+            .status(500)
+            .json({ success: false, message: "Internal server error" });
     }
 };
 
@@ -107,6 +172,7 @@ export const deleteGenre = async (req: Request, res: Response) => {
         return res.json({ success: true, message: "Genre removed successfully" });
     }
     catch (err) {
-        throw err;
+        console.error(err);
+        return res.status(500).json({ success: false, message: "Internal server error" });
     }
 };

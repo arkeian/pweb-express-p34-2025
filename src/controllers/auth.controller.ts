@@ -11,6 +11,12 @@ export const register = async (req: Request, res: Response) => {
     if (!username || !email || !password)
       return res.status(400).json({ message: 'All fields are required' });
 
+    if (!/\S+@\S+\.\S+/.test(email))
+      return res.status(400).json({ message: 'Invalid email format' });
+
+    if (password.length < 6)
+      return res.status(400).json({ message: 'Password must be at least 6 characters' });
+
     const existingUser = await prisma.user.findUnique({ where: { email } });
     if (existingUser) return res.status(400).json({ message: 'Email already exists' });
 
@@ -20,7 +26,8 @@ export const register = async (req: Request, res: Response) => {
       data: { username, email, password: hashedPassword },
     });
 
-    res.status(201).json({ message: 'User registered successfully', user });
+    const { password: _, ...safeUser } = user;
+    res.status(201).json({ message: 'User registered successfully', user: safeUser });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error' });

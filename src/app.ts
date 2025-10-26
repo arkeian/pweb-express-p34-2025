@@ -19,7 +19,7 @@ app.use("/books", booksRouter);
 app.use("/genre", genreRouter);
 app.use("/transactions", transactionRoutes);
 
-app.get("/", (req, res) => {
+app.get("/health-check", (req, res) => {
   res.json({ success: true, message: "IT Literature Shop API is running", date: new Date().toDateString() });
 });
 
