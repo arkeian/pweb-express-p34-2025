@@ -105,22 +105,74 @@ export const getAllTransactions = async (req: Request, res: Response) => {
   try {
     const { page, limit, skip } = parsePagination(req.query);
 
-    const total = await prisma.transaction.count();
+    const search = (req.query.search as string | undefined) || "";
+    const orderById = (req.query.orderById as string | undefined)?.toLowerCase();
+    const orderByAmount = (req.query.orderByAmount as string | undefined)?.toLowerCase();
+    const orderByPrice = (req.query.orderByPrice as string | undefined)?.toLowerCase();
+
+    const where: any = {};
+
+    if (search) {
+      where.OR = [
+        { user: { username: { contains: search, mode: "insensitive" } } },
+        { user: { email: { contains: search, mode: "insensitive" } } },
+        { id: { contains: search, mode: "insensitive" } },
+      ];
+    }
+
+    const orderBy: any[] = [];
+
+    if (orderById) {
+      orderBy.push({ id: orderById === "asc" ? "asc" : "desc" });
+    }
+
+    if (orderByAmount) {
+      orderBy.push({ totalAmount: orderByAmount === "asc" ? "asc" : "desc" });
+    }
+
+    if (orderByPrice) {
+      orderBy.push({ totalAmount: orderByPrice === "asc" ? "asc" : "desc" });
+    }
+
+    if (orderBy.length === 0) {
+      orderBy.push({ createdAt: "desc" });
+    }
+
+    const total = await prisma.transaction.count({ where });
+
     const transactions = await prisma.transaction.findMany({
+      where,
       include: {
         user: { select: { id: true, username: true, email: true } },
-        items: { include: { book: { select: { id: true, title: true } } } }
+        items: {
+          include: {
+            book: { select: { id: true, title: true, price: true } },
+          },
+        },
       },
-      orderBy: { createdAt: "desc" },
+      orderBy,
       skip,
-      take: limit
+      take: limit,
     });
+
+    const mapped = transactions.map((tx) => ({
+      id: tx.id,
+      totalAmount: tx.totalAmount,
+      createdAt: tx.createdAt,
+      user: tx.user,
+      items: tx.items.map((i) => ({
+        bookId: i.book.id,
+        title: i.book.title,
+        price: i.book.price,
+        quantity: i.quantity,
+      })),
+    }));
 
     return res.json({
       success: true,
       message: "Get all transactions successfully",
-      data: transactions,
-      meta: metaResponse(page, limit, total)
+      data: mapped,
+      meta: metaResponse(page, limit, total),
     });
   } catch (err) {
     console.error(err);
@@ -131,26 +183,49 @@ export const getAllTransactions = async (req: Request, res: Response) => {
 export const getTransactionById = async (req: Request, res: Response) => {
   try {
     const id = req.params.id;
+
     const transaction = await prisma.transaction.findUnique({
       where: { id },
       include: {
         user: { select: { id: true, username: true, email: true } },
-        items: { include: { book: { select: { id: true, title: true } } } }
-      }
+        items: {
+          include: {
+            book: { select: { id: true, title: true, price: true } },
+          },
+        },
+      },
     });
 
     if (!transaction) {
-      return res.status(404).json({ success: false, message: "Transaction not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Transaction not found" });
     }
+
+    const mapped = {
+      id: transaction.id,
+      totalAmount: transaction.totalAmount,
+      createdAt: transaction.createdAt,
+      user: transaction.user,
+      items: transaction.items.map((item) => ({
+        bookId: item.book.id,
+        title: item.book.title,
+        price: item.book.price,
+        quantity: item.quantity,
+      })),
+    };
 
     return res.json({
       success: true,
       message: "Get transaction detail successfully",
-      data: transaction
+      data: mapped,
     });
-  } catch (err) {
+  }
+  catch (err) {
     console.error(err);
-    return res.status(500).json({ success: false, message: "Internal server error" });
+    return res
+      .status(500)
+      .json({ success: false, message: "Internal server error" });
   }
 };
 

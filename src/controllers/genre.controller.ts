@@ -15,7 +15,7 @@ export const createGenre = async (req: Request, res: Response) => {
 
         const { name, description } = req.body;
 
-        const existingGenre = await prisma.genre.findUnique({ where: { name } });
+        const existingGenre = await prisma.genre.findFirst({ where: { name, deletedAt: null } });
 
         if (existingGenre) {
             if (existingGenre.deletedAt === null) {
@@ -103,14 +103,16 @@ export const updateGenre = async (req: Request, res: Response) => {
         const id = req.params.genre_id || req.params.id;
         const { name, description } = req.body;
 
-        const genreExisting = await prisma.genre.findFirst({
-            where: { id, deletedAt: null },
-        });
+        const genreExisting = await prisma.genre.findFirst({ where: { id } });
 
         if (!genreExisting) {
             return res
                 .status(404)
                 .json({ success: false, message: "Genre not found" });
+        }
+
+        if (genreExisting.deletedAt !== null) {
+            return res.status(409).json({ success: false, message: "This genre has been deleted. Please recreate it using POST to restore it first" });
         }
 
         if (name && name !== genreExisting.name) {

@@ -81,7 +81,7 @@ export const createBook = async (req: Request, res: Response) => {
             return res.status(404).json({ success: false, message: "Genre not found" });
         }
 
-        const existingBook = await prisma.book.findUnique({ where: { title } });
+        const existingBook = await prisma.book.findFirst({ where: { title, writer, publisher, deletedAt: null } });
 
         if (existingBook) {
             if (existingBook.deletedAt === null) {
@@ -318,12 +318,6 @@ export const getBooksByGenre = async (req: Request, res: Response) => {
 
 export const updateBook = async (req: Request, res: Response) => {
     try {
-        const errors = validationResult(req);
-
-        if (!errors.isEmpty()) {
-            return res.status(422).json({ success: false, message: "Validation error", data: errors.array() });
-        }
-        
         const id = req.params.book_id || req.params.id;
         const {
             title,
@@ -338,14 +332,16 @@ export const updateBook = async (req: Request, res: Response) => {
             genreId,
         } = req.body;
 
-        const bookExisting = await prisma.book.findFirst({
-            where: { id, deletedAt: null },
-        });
+        const bookExisting = await prisma.book.findFirst({ where: { id } });
 
         if (!bookExisting) {
             return res
                 .status(404)
                 .json({ success: false, message: "Book not found" });
+        }
+
+        if (bookExisting.deletedAt !== null) {
+            return res.status(409).json({ success: false, message: "This book has been deleted. Please recreate it using POST to restore it first" });
         }
 
         if (title && title !== bookExisting.title) {

@@ -33,7 +33,7 @@ enum BookCondition {
 
 model Genre {
   id          String    @id @default(uuid())
-  name        String    @unique
+  name        String
   description String?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime?
@@ -41,19 +41,20 @@ model Genre {
 
   books       Book[]
 
+  @@unique([name, deletedAt])
   @@map("genres")
 }
 
 model Book {
   id              String    @id @default(uuid())
-  title           String    @unique
+  title           String
   writer          String
   publisher       String
-  isbn            String?
+  isbn            String?   @unique
   description     String?
   publicationYear Int?
   condition       BookCondition @default(NEW)
-  price           Int       // store price in smallest unit (e.g., cents or IDR)
+  price           Int
   stockQuantity   Int
   createdAt       DateTime  @default(now())
   updatedAt       DateTime?
@@ -66,6 +67,7 @@ model Book {
   transactionItems TransactionItem[]
 
   @@index([genreId])
+  @@unique([title, writer, publisher, deletedAt])
   @@map("books")
 }
 
